@@ -80,6 +80,58 @@ class PlanViewSet(viewsets.ModelViewSet):
         # Gib die Daten des neu erstellten Plans zurück
         serializer = self.get_serializer(neuer_plan)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+    
+        # NEU: Wir überschreiben auch die update-Methode
+    def update(self, request, *args, **kwargs):
+        plan_obj = self.get_object() # Holt den Plan, der bearbeitet wird
+        data = request.data
+        user = request.user
+
+        # Sicherheitscheck: Gehört der Plan dem User? (wird durch get_queryset schon sichergestellt, aber doppelt hält besser)
+        if plan_obj.landwirt.berater != user:
+            return Response({'error': 'Keine Berechtigung.'}, status=status.HTTP_403_FORBIDDEN)
+        
+        with transaction.atomic():
+            # 1. Update der einfachen Felder (z.B. Status)
+            plan_obj.status = data.get('status', plan_obj.status)
+            plan_obj.jahr = data.get('jahr', plan_obj.jahr)
+            plan_obj.save()
+
+            # 2. Alle alten, verknüpften Objekte löschen
+            plan_obj.kulturen.all().delete() # Löscht alle Kulturen und kaskadierend alle Behandlungen
+
+            # 3. Die Logik zum Neu-Erstellen der Behandlungen (fast identisch zur create-Methode)
+            erstellte_kulturen = {}
+            for behandlung_data in data.get('behandlungen', []):
+                kultur_id = behandlung_data['kulturId']
+                
+                if kultur_id not in erstellte_kulturen:
+                    kultur_meta = KulturMetadaten.objects.get(id=kultur_id)
+                    neue_kultur = Kultur.objects.create(
+                        plan=plan_obj,
+                        name=kultur_meta.name,
+                        flaeche_ha=0 # Platzhalter
+                    )
+                    erstellte_kulturen[kultur_id] = neue_kultur
+                
+                aktuelle_kultur_im_plan = erstellte_kulturen[kultur_id]
+
+                neue_behandlung = Behandlung.objects.create(
+                    kultur=aktuelle_kultur_im_plan,
+                    titel="Behandlung",
+                    eigene_notizen=f"Produkt: {behandlung_data['produktName']}, Aufwand: {behandlung_data['aufwandmenge']}"
+                )
+
+                produkt = Pflanzenschutzmittel.objects.get(id=behandlung_data['produktId'])
+                ProduktInBehandlung.objects.create(
+                    behandlung=neue_behandlung,
+                    produkt=produkt,
+                    aufwandmenge=behandlung_data['aufwandmenge'].split(' ')[0],
+                    einheit='l/ha'
+                )
+
+        serializer = self.get_serializer(plan_obj)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 class KulturMetadatenViewSet(viewsets.ReadOnlyModelViewSet):
     """
