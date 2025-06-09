@@ -1,5 +1,11 @@
 <template>
   <div v-if="plan" class="plan-detail">
+    <div class="actions">
+  <router-link :to="`/plan/bearbeiten/${plan.id}`" class="button-edit">
+    Plan Bearbeiten
+  </router-link>
+  <button @click="deletePlan" class="button-delete">Plan Löschen</button>
+  </div>
     <h1>Pflanzenschutzplan für {{ plan.landwirt_name }} ({{ plan.jahr }})</h1>
     <p><strong>Status:</strong> {{ plan.status }}</p>
 
@@ -27,9 +33,10 @@
 <script setup>
 import { ref, onMounted } from 'vue';
 import axios from 'axios';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 
 const route = useRoute(); // Gibt uns Zugriff auf die aktuelle URL und ihre Parameter
+const router = useRouter();
 const plan = ref(null);   // Hier speichern wir die Plandaten vom Backend
 
 // Diese Funktion wird ausgeführt, sobald die Seite geladen wird
@@ -43,6 +50,21 @@ onMounted(async () => {
     console.error("Fehler beim Laden der Plandetails:", error);
   }
 });
+const deletePlan = async () => {
+  const planId = route.params.id;
+  // Sicherheitsabfrage, um versehentliches Löschen zu verhindern
+  if (window.confirm("Möchtest du diesen Plan wirklich endgültig löschen?")) {
+    try {
+      await axios.delete(`http://127.0.0.1:8000/api/plaene/${planId}/`);
+      alert('Plan erfolgreich gelöscht.');
+      // Nach dem Löschen zurück zum Dashboard
+      router.push('/dashboard');
+    } catch (error) {
+      console.error("Fehler beim Löschen des Plans:", error);
+      alert('Der Plan konnte nicht gelöscht werden.');
+    }
+  }
+};
 </script>
 
 <style scoped>
@@ -67,4 +89,32 @@ ul { list-style: none; padding-left: 0; }
 li { margin-bottom: 10px; }
 .dosierung { padding-left: 15px; color: #555; }
 .notiz { font-style: italic; color: #333; margin-top: 10px; }
+.actions {
+  margin-bottom: 20px;
+  text-align: right;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+.button-edit, .button-delete {
+  color: white;
+  border: none;
+  padding: 10px 15px;
+  border-radius: 5px;
+  cursor: pointer;
+  text-decoration: none; /* Wichtig für den router-link */
+  font-size: 14px;
+}
+.button-edit {
+  background-color: #007bff; /* Blau für Bearbeiten */
+}
+.button-edit:hover {
+  background-color: #0056b3;
+}
+.button-delete {
+  background-color: #dc3545; /* Rot für Löschen */
+}
+.button-delete:hover {
+  background-color: #c82333;
+}
 </style>

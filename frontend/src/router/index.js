@@ -7,6 +7,7 @@ import FarmerListView from '../views/FarmerListView.vue'
 import CreateFarmerView from '../views/CreateFarmerView.vue'
 // NEU: Die Detail-View importieren
 import PlanDetailView from '../views/PlanDetailView.vue'
+import EditPlanView from '../views/EditPlanView.vue'
 
 const routes = [
   { path: '/', name: 'home', component: HomeView },
@@ -16,9 +17,15 @@ const routes = [
   { path: '/landwirte/neu', name: 'create-farmer', component: CreateFarmerView },
   // NEU: Route für die Plan-Detailseite
   {
-    path: '/plan/detail/:id', // :id ist ein Platzhalter für die Plan-ID
+    path: '/plan/detail/:id',
     name: 'plan-detail',
     component: PlanDetailView
+  },
+  // NEU:
+  {
+    path: '/plan/bearbeiten/:id',
+    name: 'edit-plan',
+    component: EditPlanView
   },
   { path: '/about', name: 'about', component: () => import('../views/AboutView.vue') }
 ]

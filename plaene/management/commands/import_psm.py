@@ -1,15 +1,16 @@
-# plaene/management/commands/import_psm.py (Finale Version mit expliziter Dekodierung)
+# plaene/management/commands/import_psm.py
 
 import requests
 import io
 import zipfile
-import xml.etree.ElementTree as ET
+from lxml import etree
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from plaene.models import Pflanzenschutzmittel, KulturMetadaten, SchaderregerMetadaten, Zulassung
 
 class Command(BaseCommand):
-    help = 'Lädt das ZIP-Archiv vom BLV, entpackt die XML und importiert die Produktdaten inkl. aller Zulassungen.'
+    help = 'Lädt das ZIP-Archiv vom BLV mit lxml und importiert die Produktdaten inkl. aller Zulassungen (finale XPath-Version).'
+
     PSM_ZIP_URL = "https://www.blv.admin.ch/dam/blv/de/dokumente/zulassung-pflanzenschutzmittel/pflanzenschutzmittelverzeichnis/daten-pflanzenschutzmittelverzeichnis.zip.download.zip/Daten%20Pflanzenschutzmittelverzeichnis.zip"
 
     @transaction.atomic
@@ -24,41 +25,29 @@ class Command(BaseCommand):
             with zipfile.ZipFile(zip_in_memory, 'r') as zip_ref:
                 xml_filename = next((name for name in zip_ref.namelist() if name.lower().endswith('.xml')), None)
                 if not xml_filename: raise ValueError("Keine XML-Datei im ZIP-Archiv gefunden.")
-                # Lese die rohen Bytes aus der ZIP-Datei
                 xml_bytes = zip_ref.read(xml_filename)
             self.stdout.write(self.style.SUCCESS(f"Download und Entpacken von '{xml_filename}' erfolgreich."))
         except Exception as e:
             self.stderr.write(self.style.ERROR(f"Fehler bei Download/Entpacken: {e}"))
             return
         
-        # --- HIER IST DIE ENTSCHEIDENDE ÄNDERUNG ---
-        # Wir dekodieren die Bytes explizit mit der korrekten Kodierung aus der XML-Datei
-        try:
-            xml_content_decoded = xml_bytes.decode('iso-8859-1')
-            root = ET.fromstring(xml_content_decoded)
-        except Exception as e:
-            self.stderr.write(self.style.ERROR(f"Fehler beim Parsen der XML mit ISO-8859-1: {e}"))
-            return
-        # --- ENDE DER ÄNDERUNG ---
+        root = etree.fromstring(xml_bytes)
+        self.stdout.write("XML-Daten erfolgreich mit lxml geparst.")
 
-        self.stdout.write("Verarbeite XML-Daten...")
-        self.stdout.write("Lösche alte Zulassungs- und Metadaten für einen sauberen Import...")
+        self.stdout.write("Lösche alte Zulassungs- und Metadaten...")
         KulturMetadaten.objects.all().delete()
         SchaderregerMetadaten.objects.all().delete()
         Zulassung.objects.all().delete()
 
-        kultur_count = self.create_metadata_from_xml(root, 'Culture', KulturMetadaten)
-        self.stdout.write(f"{kultur_count} Kulturen in die Datenbank importiert.")
-        pest_count = self.create_metadata_from_xml(root, 'Pest', SchaderregerMetadaten)
-        self.stdout.write(f"{pest_count} Schaderreger in die Datenbank importiert.")
+        self.create_metadata_from_xml(root, 'Culture', KulturMetadaten)
+        self.create_metadata_from_xml(root, 'Pest', SchaderregerMetadaten)
         
-        alle_produkt_eintraege = root.findall('Products/Product') + root.findall('.//Parallelimport')
+        alle_produkt_eintraege = root.xpath("//*[local-name()='Product' or local-name()='Parallelimport']")
         self.stdout.write(f"{len(alle_produkt_eintraege)} Produkte und Parallelimporte gefunden. Importiere jetzt...")
 
-        # ... (der Rest des Skripts, die Schleifen, etc. bleiben exakt gleich) ...
         for produkt_node in alle_produkt_eintraege:
             produktname = produkt_node.get('name')
-            if produkt_node.tag == 'Parallelimport':
+            if produkt_node.tag.endswith('Parallelimport'):
                 zulassungsnr = produkt_node.get('id', '')
             else:
                 zulassungsnr = produkt_node.get('wNbr')
@@ -69,14 +58,16 @@ class Command(BaseCommand):
                 zulassungsnr=zulassungsnr, defaults={'produktname': produktname}
             )
             
-            product_info_node = produkt_node.find('ProductInformation')
-            if product_info_node is None: continue
+            product_info_nodes = produkt_node.xpath("./*[local-name()='ProductInformation']")
+            if not product_info_nodes: continue
+            product_info_node = product_info_nodes[0]
 
-            indication_nodes = product_info_node.findall('Indication')
+            indication_nodes = product_info_node.xpath("./*[local-name()='Indication']")
 
             for indication_node in indication_nodes:
-                culture_node = indication_node.find('Culture')
-                if not culture_node: continue
+                culture_nodes = indication_node.xpath("./*[local-name()='Culture']")
+                if not culture_nodes: continue
+                culture_node = culture_nodes[0]
                 
                 kultur_pk = culture_node.get('primaryKey')
                 try:
@@ -86,7 +77,7 @@ class Command(BaseCommand):
                 aufwandmenge = indication_node.get('expenditureForm', '')
                 wartefrist = indication_node.get('waitingPeriod', '')
 
-                for pest_node in indication_node.findall('Pest'):
+                for pest_node in indication_node.xpath("./*[local-name()='Pest']"):
                     pest_pk = pest_node.get('primaryKey')
                     try:
                         schaderreger_obj = SchaderregerMetadaten.objects.get(blv_id=pest_pk)
@@ -100,15 +91,17 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f"Import abgeschlossen! {zulassungen_count} gültige Zulassungen wurden erstellt."))
 
     def create_metadata_from_xml(self, root, metadata_name, model_class):
-        metadata_block = root.find(f"./MetaData[@name='{metadata_name}']")
+        metadata_blocks = root.xpath(f".//*[local-name()='MetaData' and @name='{metadata_name}']")
         count = 0
-        if metadata_block is not None:
-            for detail_node in metadata_block.findall('Detail'):
+        if metadata_blocks:
+            metadata_block = metadata_blocks[0]
+            for detail_node in metadata_block.xpath("./*[local-name()='Detail']"):
                 key = detail_node.get('primaryKey')
-                desc_node = detail_node.find("./Description[@language='de']")
-                if desc_node is not None:
-                    name = desc_node.get('value')
+                desc_nodes = detail_node.xpath("./*[local-name()='Description' and @language='de']")
+                if desc_nodes:
+                    name = desc_nodes[0].get('value')
                     if key and name and model_class:
                         model_class.objects.get_or_create(blv_id=key, defaults={'name': name})
                         count += 1
+        self.stdout.write(f"{count} '{metadata_name}'-Metadaten in die Datenbank importiert.")
         return count

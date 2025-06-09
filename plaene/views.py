@@ -2,9 +2,9 @@
 
 from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
-from .models import Plan, Kultur, Behandlung, ProduktInBehandlung, Landwirt, KulturMetadaten, SchaderregerMetadaten, Pflanzenschutzmittel
+from .models import Plan, Kultur, Behandlung, ProduktInBehandlung, Landwirt, KulturMetadaten, SchaderregerMetadaten, Pflanzenschutzmittel, Zulassung
 from django.db import transaction
-from .serializers import PlanSerializer, KulturMetadatenSerializer, PflanzenschutzmittelSerializer, SchaderregerMetadatenSerializer, LandwirtSerializer
+from .serializers import PlanSerializer, KulturMetadatenSerializer, PflanzenschutzmittelSerializer, SchaderregerMetadatenSerializer, LandwirtSerializer, ZulassungDetailSerializer
 
 from rest_framework.response import Response
 from rest_framework import status
@@ -103,9 +103,27 @@ class PflanzenschutzmittelViewSet(viewsets.ReadOnlyModelViewSet):
         return queryset
 
 class SchaderregerMetadatenViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = SchaderregerMetadaten.objects.all().order_by('name')
     serializer_class = SchaderregerMetadatenSerializer
     permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        """
+        Filtert die Schaderreger. Wenn kultur und produkt übergeben werden,
+        werden nur die für diese Kombination zugelassenen Schaderreger angezeigt.
+        """
+        queryset = SchaderregerMetadaten.objects.all()
+        kultur_id = self.request.query_params.get('kultur')
+        produkt_id = self.request.query_params.get('produkt')
+
+        if kultur_id and produkt_id:
+            # Gib nur die Schaderreger zurück, für die eine Zulassung
+            # mit der gegebenen Kultur UND dem Produkt existiert.
+            queryset = queryset.filter(
+                zulassung__kultur__id=kultur_id,
+                zulassung__produkt__id=produkt_id
+            ).distinct()
+
+        return queryset.order_by('name')
 
 class LandwirtViewSet(viewsets.ModelViewSet): # von ReadOnlyModelViewSet zu ModelViewSet ändern
     """ Zeigt die Landwirte an UND erlaubt das Erstellen/Ändern/Löschen. """
@@ -119,3 +137,28 @@ class LandwirtViewSet(viewsets.ModelViewSet): # von ReadOnlyModelViewSet zu Mode
     def perform_create(self, serializer):
         """ Setzt den eingeloggten Benutzer automatisch als 'Berater'. """
         serializer.save(berater=self.request.user)
+
+class ZulassungViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = ZulassungDetailSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        """
+        Filtert die exakte Zulassung basierend auf Produkt, Kultur und Schaderreger.
+        """
+        queryset = Zulassung.objects.all()
+        kultur_id = self.request.query_params.get('kultur')
+        produkt_id = self.request.query_params.get('produkt')
+        schaderreger_id = self.request.query_params.get('schaderreger')
+
+        if kultur_id and produkt_id and schaderreger_id:
+            queryset = queryset.filter(
+                kultur__id=kultur_id,
+                produkt__id=produkt_id,
+                schaderreger__id=schaderreger_id
+            )
+        else:
+            # Wenn nicht alle Filter gesetzt sind, eine leere Liste zurückgeben
+            return Zulassung.objects.none()
+
+        return queryset

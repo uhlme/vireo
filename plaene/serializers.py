@@ -3,7 +3,7 @@
 from rest_framework import serializers
 from .models import (
     Plan, Kultur, Behandlung, ProduktInBehandlung, 
-    KulturMetadaten, Pflanzenschutzmittel, SchaderregerMetadaten, Landwirt
+    KulturMetadaten, Pflanzenschutzmittel, SchaderregerMetadaten, Landwirt, Zulassung
 )
 
 # Diese Serializer bleiben für einfache Listen oder zum Erstellen
@@ -65,3 +65,8 @@ class PlanSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             'landwirt': {'write_only': True} # 'landwirt' wird nur zum Schreiben einer ID erwartet
         }
+
+class ZulassungDetailSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Zulassung
+        fields = ['id', 'aufwandmenge', 'wartefrist', 'anzahl_anwendungen']
