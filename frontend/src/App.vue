@@ -1,12 +1,15 @@
 <template>
-  <nav>
-    <router-link to="/">Home</router-link> |
+    <nav v-if="isAuthenticated">
     <router-link to="/dashboard">Dashboard</router-link> |
+    <router-link to="/plan/erstellen">Plan erstellen</router-link> |
     <router-link to="/landwirte">Meine Landwirte</router-link>
-  </nav>
+    </nav>
   <router-view/>
 </template>
-
+<script setup>
+// DIESE ZEILE IST ENTSCHEIDEND UND HAT WAHRSCHEINLICH GEFEHLT:
+import { isAuthenticated } from './auth';
+</script>
 <style>
 #app {
   font-family: Avenir, Helvetica, Arial, sans-serif;

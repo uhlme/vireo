@@ -18,8 +18,8 @@
 <script setup>
 import { ref } from 'vue'
 import axios from 'axios'
-// NEU: useRouter importieren, um weiterleiten zu können
 import { useRouter } from 'vue-router'
+import { isAuthenticated } from '../auth'; // Importiere unseren Status
 
 const username = ref('');
 const password = ref('');
@@ -44,7 +44,8 @@ const handleLogin = async () => {
 
     // 2. Setze den "Authorization"-Header für alle zukünftigen axios-Anfragen
     axios.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`;
-
+    
+    isAuthenticated.value = true;
     // 3. Leite den Benutzer zum Dashboard weiter
     router.push('/dashboard');
     // --- ENDE DER NEUEN LOGIK ---

@@ -52,21 +52,28 @@ class KulturDetailSerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'flaeche_ha', 'behandlungen']
 
 # --- Wir passen den bestehenden PlanSerializer an ---
-
-class PlanSerializer(serializers.ModelSerializer):
+class PlanListSerializer(serializers.ModelSerializer):
     landwirt_name = serializers.CharField(source='landwirt.__str__', read_only=True)
-    # NEU: Fügt die verschachtelten Kulturen zur API-Antwort hinzu
+
+    class Meta:
+        model = Plan
+        fields = ['id', 'landwirt_name', 'jahr', 'status']
+        
+class PlanDetailSerializer(serializers.ModelSerializer):
+    landwirt_name = serializers.CharField(source='landwirt.__str__', read_only=True)
     kulturen = KulturDetailSerializer(many=True, read_only=True)
 
     class Meta:
         model = Plan
-        # Füge 'kulturen' zur Liste der Felder hinzu
         fields = ['id', 'landwirt', 'landwirt_name', 'jahr', 'status', 'kulturen']
         extra_kwargs = {
-            'landwirt': {'write_only': True} # 'landwirt' wird nur zum Schreiben einer ID erwartet
+            'landwirt': {'write_only': True}
         }
 
 class ZulassungDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Zulassung
         fields = ['id', 'aufwandmenge', 'wartefrist', 'anzahl_anwendungen']
+
+
+

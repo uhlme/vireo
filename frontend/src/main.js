@@ -1,19 +1,38 @@
+// src/main.js
 import { createApp } from 'vue'
 import App from './App.vue'
 import router from './router'
-// NEU: axios importieren
 import axios from 'axios'
+import { isAuthenticated } from './auth' // Importiere unseren neuen Status
 
-// --- NEUER STARTUP-CHECK ---
-// Wir prüfen, ob ein Token im localStorage vorhanden ist,
-// wenn die Anwendung zum ersten Mal geladen wird.
+// Der Startup-Check für einen bestehenden Token bleibt bestehen
 const token = localStorage.getItem('accessToken');
-
 if (token) {
-  // Wenn ja, setzen wir ihn als Standard-Header für alle zukünftigen axios-Anfragen.
-  // So "erinnert" sich die App bei jedem Neuladen daran, eingeloggt zu sein.
   axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
 }
-// --- ENDE DES CHECKS ---
+
+// --- NEU: Der globale Response Interceptor ---
+axios.interceptors.response.use(
+  // Funktion für erfolgreiche Antworten (hier tun wir nichts)
+  (response) => response,
+  // Funktion für fehlerhafte Antworten
+  (error) => {
+    // Prüfen, ob der Fehler ein 401-Status ist
+    if (error.response && error.response.status === 401) {
+      // 1. Token aus dem Speicher entfernen
+      localStorage.removeItem('accessToken');
+      // 2. Auth-Header für zukünftige Anfragen entfernen
+      delete axios.defaults.headers.common['Authorization'];
+      // 3. Unseren globalen Status auf 'false' setzen
+      isAuthenticated.value = false;
+      // 4. Den Benutzer zur Login-Seite weiterleiten
+      router.push('/'); // Annahme: '/' ist deine Login-Seite
+      console.log("Token abgelaufen oder ungültig. Automatischer Logout.");
+    }
+    // Wichtig: Den Fehler trotzdem weitergeben, damit die ursprüngliche Komponente ihn fangen kann
+    return Promise.reject(error);
+  }
+);
+// --- ENDE DES INTERCEPTORS ---
 
 createApp(App).use(router).mount('#app')

@@ -1,147 +1,135 @@
 # plaene/views.py
 
-from rest_framework import viewsets
-from rest_framework.permissions import IsAuthenticated
-from .models import Plan, Kultur, Behandlung, ProduktInBehandlung, Landwirt, KulturMetadaten, SchaderregerMetadaten, Pflanzenschutzmittel, Zulassung
 from django.db import transaction
-from .serializers import PlanSerializer, KulturMetadatenSerializer, PflanzenschutzmittelSerializer, SchaderregerMetadatenSerializer, LandwirtSerializer, ZulassungDetailSerializer
-
+from rest_framework import viewsets, status
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework import status
+
+# Importiere alle Modelle nur einmal
+from .models import (
+    Plan, Kultur, Behandlung, ProduktInBehandlung, Landwirt, 
+    KulturMetadaten, SchaderregerMetadaten, Pflanzenschutzmittel, Zulassung
+)
+# Importiere alle Serializer nur einmal
+from .serializers import (
+    PlanListSerializer, PlanDetailSerializer, KulturMetadatenSerializer, 
+    PflanzenschutzmittelSerializer, SchaderregerMetadatenSerializer, 
+    LandwirtSerializer, ZulassungDetailSerializer
+)
+
 
 class PlanViewSet(viewsets.ModelViewSet):
-    serializer_class = PlanSerializer
+    """
+    Ein ViewSet, das alle CRUD-Operationen für Pläne bereitstellt.
+    Nutzt unterschiedliche Serializer für Listen- und Detailansichten.
+    """
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
+        # Gibt nur die Pläne des eingeloggten Benutzers zurück
         user = self.request.user
-        return Plan.objects.filter(landwirt__berater=user)
+        return Plan.objects.filter(landwirt__berater=user).prefetch_related(
+            'kulturen__behandlungen__produkte_im_mix__produkt'
+        )
 
-    # WICHTIG: Die perform_create Methode entfernen oder auskommentieren,
-    # da wir die Logik jetzt in der create-Methode selbst steuern.
+    def get_serializer_class(self):
+        # Wählt den passenden Serializer je nach Aktion
+        if self.action == 'list':
+            return PlanListSerializer
+        # Für alle anderen Aktionen (Detail, Erstellen, Update) wird der detaillierte Serializer verwendet
+        return PlanDetailSerializer
 
-    # NEU: Wir überschreiben die komplette create-Methode
     def create(self, request, *args, **kwargs):
         data = request.data
         user = request.user
-
         try:
-            # Prüfen, ob der angegebene Landwirt dem User gehört
-            landwirt = Landwirt.objects.get(id=data['landwirt'], berater=user)
+            landwirt = Landwirt.objects.get(id=data['landwirtId'], berater=user)
         except Landwirt.DoesNotExist:
             return Response({'error': 'Landwirt nicht gefunden oder keine Berechtigung.'}, status=status.HTTP_403_FORBIDDEN)
 
-        # @transaction.atomic sorgt dafür, dass alle DB-Operationen nur dann gespeichert werden,
-        # wenn ALLES erfolgreich ist. Bei einem Fehler wird alles zurückgerollt.
         with transaction.atomic():
-            # 1. Haupt-Plan erstellen
-            neuer_plan = Plan.objects.create(
-                landwirt=landwirt,
-                jahr=data['jahr'],
-                status='Entwurf' # Wir setzen den Status standardmässig auf Entwurf
-            )
-
-            # Ein Dictionary, um Kulturen nicht doppelt anzulegen
-            erstellte_kulturen = {}
-
-            # 2. Durch die Behandlungen aus dem Frontend loopen
-            for behandlung_data in data.get('behandlungen', []):
-                kultur_id = behandlung_data['kulturId']
-                
-                # Prüfen, ob wir die Kultur für diesen Plan schon angelegt haben
-                if kultur_id not in erstellte_kulturen:
-                    kultur_meta = KulturMetadaten.objects.get(id=kultur_id)
-                    neue_kultur = Kultur.objects.create(
-                        plan=neuer_plan,
-                        name=kultur_meta.name,
-                        flaeche_ha=0 # Platzhalter, dieses Feld müssen wir noch im Frontend hinzufügen
-                    )
-                    erstellte_kulturen[kultur_id] = neue_kultur
-                
-                aktuelle_kultur_im_plan = erstellte_kulturen[kultur_id]
-
-                # 3. Behandlung erstellen
-                neue_behandlung = Behandlung.objects.create(
-                    kultur=aktuelle_kultur_im_plan,
-                    titel="Behandlung", # Platzhalter
-                    anwendungszeitpunkt="", # Platzhalter
-                    eigene_notizen=f"Produkt: {behandlung_data['produktName']}, Aufwand: {behandlung_data['aufwandmenge']}"
-                )
-
-                # 4. Produkt zur Behandlung hinzufügen
-                produkt = Pflanzenschutzmittel.objects.get(id=behandlung_data['produktId'])
-                ProduktInBehandlung.objects.create(
-                    behandlung=neue_behandlung,
-                    produkt=produkt,
-                    aufwandmenge=behandlung_data['aufwandmenge'].split(' ')[0], # Nur die Zahl extrahieren
-                    einheit='l/ha' # Annahme
-                )
-
-        # Gib die Daten des neu erstellten Plans zurück
+            neuer_plan = Plan.objects.create(landwirt=landwirt, jahr=data['jahr'], status='Entwurf')
+            for kultur_data in data.get('kulturen', []):
+                try:
+                    kultur_meta = KulturMetadaten.objects.get(id=kultur_data['meta_id'])
+                    neue_kultur = Kultur.objects.create(plan=neuer_plan, name=kultur_meta.name, flaeche_ha=kultur_data.get('flaeche_ha', 0))
+                    for behandlung_data in kultur_data.get('behandlungen', []):
+                        neue_behandlung = Behandlung.objects.create(kultur=neue_kultur, titel=behandlung_data.get('titel', 'Unbenannte Behandlung'))
+                        for produkt_data in behandlung_data.get('produkte_im_mix', []):
+                            produkt = Pflanzenschutzmittel.objects.get(id=produkt_data['produktId'])
+                            ProduktInBehandlung.objects.create(
+                                behandlung=neue_behandlung,
+                                produkt=produkt,
+                                aufwandmenge=str(produkt_data.get('aufwandmenge', '')).split(' ')[0],
+                                einheit='N/A'
+                            )
+                except KulturMetadaten.DoesNotExist:
+                    continue
+        
         serializer = self.get_serializer(neuer_plan)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
-    
-        # NEU: Wir überschreiben auch die update-Methode
-     # NEU: Wir überschreiben die update-Methode
+
     def update(self, request, *args, **kwargs):
-        plan_obj = self.get_object() # Holt den Plan, der bearbeitet wird
+        plan_obj = self.get_object()
         data = request.data
         
-        # @transaction.atomic sorgt dafür, dass alle DB-Operationen nur dann gespeichert werden,
-        # wenn ALLES erfolgreich ist. Bei einem Fehler wird alles zurückgerollt.
         with transaction.atomic():
-            # 1. Update der einfachen Felder (z.B. Status)
+            # 1. Update der Plan-Stammdaten
             plan_obj.status = data.get('status', plan_obj.status)
             plan_obj.jahr = data.get('jahr', plan_obj.jahr)
             plan_obj.save()
 
-            # 2. Alle alten, verknüpften Objekte löschen, um sauber neu aufzubauen
+            # 2. Alle alten Kulturen löschen, was kaskadierend alle Behandlungen etc. mit löscht
             plan_obj.kulturen.all().delete()
 
-            # 3. Die Logik zum Neu-Erstellen der Behandlungen (exakt wie in der create-Methode)
-            erstellte_kulturen = {}
-            for behandlung_data in data.get('behandlungen', []):
-                kultur_id = behandlung_data['kulturId']
-                
-                # Finde oder erstelle die Kultur für diesen Plan
-                if kultur_id not in erstellte_kulturen:
-                    # Wir gehen davon aus, dass die kulturId eine ID aus KulturMetadaten ist
-                    kultur_meta = KulturMetadaten.objects.get(id=kultur_id)
+            # 3. Die Struktur aus den neuen Frontend-Daten komplett neu aufbauen
+            for kultur_data in data.get('kulturen', []):
+                try:
+                    # Hier verwenden wir meta_id, die vom Frontend geschickt wird
+                    kultur_meta = KulturMetadaten.objects.get(id=kultur_data['meta_id'])
                     neue_kultur = Kultur.objects.create(
                         plan=plan_obj,
                         name=kultur_meta.name,
-                        flaeche_ha=0 # Platzhalter
+                        flaeche_ha=kultur_data.get('flaeche_ha', 0)
                     )
-                    erstellte_kulturen[kultur_id] = neue_kultur
-                
-                aktuelle_kultur_im_plan = erstellte_kulturen[kultur_id]
 
-                # Erstelle die Behandlung
-                neue_behandlung = Behandlung.objects.create(
-                    kultur=aktuelle_kultur_im_plan,
-                    titel="Behandlung",
-                    eigene_notizen=f"Produkt: {behandlung_data.get('produktName', '')}, Aufwand: {behandlung_data.get('aufwandmenge', '')}"
-                )
+                    for behandlung_data in kultur_data.get('behandlungen', []):
+                        neue_behandlung = Behandlung.objects.create(
+                            kultur=neue_kultur,
+                            titel=behandlung_data.get('titel', 'Unbenannte Behandlung')
+                        )
 
-                # Füge das Produkt zur Behandlung hinzu
-                produkt = Pflanzenschutzmittel.objects.get(id=behandlung_data['produktId'])
-                ProduktInBehandlung.objects.create(
-                    behandlung=neue_behandlung,
-                    produkt=produkt,
-                    aufwandmenge=str(behandlung_data['aufwandmenge']).split(' ')[0],
-                    einheit='l/ha' # Annahme
-                )
-
+                        for produkt_data in behandlung_data.get('produkte_im_mix', []):
+                            produkt = Pflanzenschutzmittel.objects.get(id=produkt_data['produktId'])
+                            ProduktInBehandlung.objects.create(
+                                behandlung=neue_behandlung,
+                                produkt=produkt,
+                                aufwandmenge=str(produkt_data.get('aufwandmenge', '')).split(' ')[0],
+                                einheit='N/A' # Platzhalter
+                            )
+                except KulturMetadaten.DoesNotExist:
+                    continue
+        
         serializer = self.get_serializer(plan_obj)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+
+class LandwirtViewSet(viewsets.ModelViewSet):
+    serializer_class = LandwirtSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Landwirt.objects.filter(berater=self.request.user)
+
+    def perform_create(self, serializer):
+        serializer.save(berater=self.request.user)
+
+
 class KulturMetadatenViewSet(viewsets.ReadOnlyModelViewSet):
-    """
-    Ein schreibgeschütztes ViewSet, das alle Kulturen aus den Metadaten anzeigt.
-    """
     queryset = KulturMetadaten.objects.all().order_by('name')
     serializer_class = KulturMetadatenSerializer
-    permission_classes = [IsAuthenticated] # Nur eingeloggte User dürfen die Kulturen sehen
+    permission_classes = [IsAuthenticated]
+
 
 class PflanzenschutzmittelViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = PflanzenschutzmittelSerializer
@@ -151,60 +139,36 @@ class PflanzenschutzmittelViewSet(viewsets.ReadOnlyModelViewSet):
         queryset = Pflanzenschutzmittel.objects.all()
         kultur_id = self.request.query_params.get('kultur')
         if kultur_id is not None:
-            # ALT: queryset = queryset.filter(zugelassene_anwendungen__id=kultur_id).distinct()
-            # NEU, expliziter und robuster:
             queryset = queryset.filter(zulassung__kultur__id=kultur_id).distinct()
         return queryset
 
+
 class SchaderregerMetadatenViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = SchaderregerMetadaten.objects.all().order_by('name')
     serializer_class = SchaderregerMetadatenSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        """
-        Filtert die Schaderreger. Wenn kultur und produkt übergeben werden,
-        werden nur die für diese Kombination zugelassenen Schaderreger angezeigt.
-        """
         queryset = SchaderregerMetadaten.objects.all()
         kultur_id = self.request.query_params.get('kultur')
         produkt_id = self.request.query_params.get('produkt')
-
         if kultur_id and produkt_id:
-            # Gib nur die Schaderreger zurück, für die eine Zulassung
-            # mit der gegebenen Kultur UND dem Produkt existiert.
             queryset = queryset.filter(
                 zulassung__kultur__id=kultur_id,
                 zulassung__produkt__id=produkt_id
             ).distinct()
-
         return queryset.order_by('name')
 
-class LandwirtViewSet(viewsets.ModelViewSet): # von ReadOnlyModelViewSet zu ModelViewSet ändern
-    """ Zeigt die Landwirte an UND erlaubt das Erstellen/Ändern/Löschen. """
-    serializer_class = LandwirtSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        return Landwirt.objects.filter(berater=self.request.user)
-
-    # NEU: Diese Methode hinzufügen
-    def perform_create(self, serializer):
-        """ Setzt den eingeloggten Benutzer automatisch als 'Berater'. """
-        serializer.save(berater=self.request.user)
 
 class ZulassungViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = ZulassungDetailSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        """
-        Filtert die exakte Zulassung basierend auf Produkt, Kultur und Schaderreger.
-        """
         queryset = Zulassung.objects.all()
         kultur_id = self.request.query_params.get('kultur')
         produkt_id = self.request.query_params.get('produkt')
         schaderreger_id = self.request.query_params.get('schaderreger')
-
         if kultur_id and produkt_id and schaderreger_id:
             queryset = queryset.filter(
                 kultur__id=kultur_id,
@@ -212,7 +176,5 @@ class ZulassungViewSet(viewsets.ReadOnlyModelViewSet):
                 schaderreger__id=schaderreger_id
             )
         else:
-            # Wenn nicht alle Filter gesetzt sind, eine leere Liste zurückgeben
             return Zulassung.objects.none()
-
         return queryset
