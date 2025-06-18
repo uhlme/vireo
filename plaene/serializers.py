@@ -45,11 +45,25 @@ class BehandlungDetailSerializer(serializers.ModelSerializer):
         fields = ['id', 'titel', 'anwendungszeitpunkt', 'eigene_notizen', 'produkte_im_mix']
 
 class KulturDetailSerializer(serializers.ModelSerializer):
-    # Jede Kultur in einem Plan hat eine Liste von Behandlungen
+    # NEU: Wir fügen manuell die ID der Metadaten hinzu
+    meta_id = serializers.SerializerMethodField()
     behandlungen = BehandlungDetailSerializer(many=True, read_only=True)
+
     class Meta:
         model = Kultur
-        fields = ['id', 'name', 'flaeche_ha', 'behandlungen']
+        # 'meta_id' zum fields-Array hinzufügen
+        fields = ['id', 'meta_id', 'name', 'flaeche_ha', 'behandlungen']
+
+    def get_meta_id(self, obj):
+        # Diese Funktion wird für jedes Kultur-Objekt aufgerufen.
+        # Sie findet das passende Metadaten-Objekt über den Namen und gibt dessen ID zurück.
+        # Dies ist ein Workaround, da wir keine direkte ForeignKey-Beziehung im Modell haben.
+        try:
+            # Finde die Kultur in den Metadaten, die denselben Namen hat
+            kultur_meta = KulturMetadaten.objects.get(name=obj.name)
+            return kultur_meta.id
+        except KulturMetadaten.DoesNotExist:
+            return None
 
 # --- Wir passen den bestehenden PlanSerializer an ---
 class PlanListSerializer(serializers.ModelSerializer):

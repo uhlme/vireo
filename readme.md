@@ -27,7 +27,7 @@ python3 -m venv venv
 
 # Virtuelle Umgebung aktivieren
 # Für Windows:
-# .\venv\Scripts\activate
+ .\venv\Scripts\activate
 # Für macOS / Linux:
 source venv/bin/activate
 

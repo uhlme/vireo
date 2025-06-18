@@ -34,7 +34,9 @@
 import { ref, onMounted } from 'vue';
 import axios from 'axios';
 import { useRoute, useRouter } from 'vue-router';
+import  { useToast } from "vue-toastification";
 
+const toast = useToast();
 const route = useRoute(); // Gibt uns Zugriff auf die aktuelle URL und ihre Parameter
 const router = useRouter();
 const plan = ref(null);   // Hier speichern wir die Plandaten vom Backend
@@ -56,12 +58,12 @@ const deletePlan = async () => {
   if (window.confirm("Möchtest du diesen Plan wirklich endgültig löschen?")) {
     try {
       await axios.delete(`http://127.0.0.1:8000/api/plaene/${planId}/`);
-      alert('Plan erfolgreich gelöscht.');
+      toast.success('Plan erfolgreich gelöscht.');
       // Nach dem Löschen zurück zum Dashboard
       router.push('/dashboard');
     } catch (error) {
       console.error("Fehler beim Löschen des Plans:", error);
-      alert('Der Plan konnte nicht gelöscht werden.');
+      toast.error('Der Plan konnte nicht gelöscht werden.');
     }
   }
 };

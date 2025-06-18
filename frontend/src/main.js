@@ -1,38 +1,41 @@
-// src/main.js
 import { createApp } from 'vue'
 import App from './App.vue'
 import router from './router'
 import axios from 'axios'
-import { isAuthenticated } from './auth' // Importiere unseren neuen Status
+import { isAuthenticated } from './auth'
 
-// Der Startup-Check für einen bestehenden Token bleibt bestehen
+// NEU: Importiere die Toast-Bibliothek und ihr CSS
+import Toast from "vue-toastification";
+import "vue-toastification/dist/index.css";
+
+// Der Startup-Check für den Token bleibt bestehen
 const token = localStorage.getItem('accessToken');
 if (token) {
   axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
 }
 
-// --- NEU: Der globale Response Interceptor ---
+// Der Interceptor bleibt ebenfalls bestehen
 axios.interceptors.response.use(
-  // Funktion für erfolgreiche Antworten (hier tun wir nichts)
   (response) => response,
-  // Funktion für fehlerhafte Antworten
   (error) => {
-    // Prüfen, ob der Fehler ein 401-Status ist
     if (error.response && error.response.status === 401) {
-      // 1. Token aus dem Speicher entfernen
       localStorage.removeItem('accessToken');
-      // 2. Auth-Header für zukünftige Anfragen entfernen
       delete axios.defaults.headers.common['Authorization'];
-      // 3. Unseren globalen Status auf 'false' setzen
       isAuthenticated.value = false;
-      // 4. Den Benutzer zur Login-Seite weiterleiten
-      router.push('/'); // Annahme: '/' ist deine Login-Seite
-      console.log("Token abgelaufen oder ungültig. Automatischer Logout.");
+      router.push('/');
     }
-    // Wichtig: Den Fehler trotzdem weitergeben, damit die ursprüngliche Komponente ihn fangen kann
     return Promise.reject(error);
   }
 );
-// --- ENDE DES INTERCEPTORS ---
 
-createApp(App).use(router).mount('#app')
+const app = createApp(App);
+app.use(router);
+
+// NEU: Sage der App, dass sie die Toast-Bibliothek mit Standard-Optionen verwenden soll
+app.use(Toast, {
+  transition: "Vue-Toastification__bounce",
+  maxToasts: 5,
+  newestOnTop: true
+});
+
+app.mount('#app');

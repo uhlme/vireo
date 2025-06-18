@@ -85,7 +85,9 @@
 import { reactive, onMounted } from 'vue';
 import axios from 'axios';
 import { useRouter } from 'vue-router';
+import { useToast } from "vue-toastification";
 
+const toast = useToast();
 const router = useRouter();
 
 // Das Haupt-Objekt, das den gesamten Plan enthält und am Ende gespeichert wird
@@ -132,7 +134,7 @@ onMounted(async () => {
 const addKultur = () => {
   if (!formState.selectedKulturId) return;
   const schonVorhanden = plan.kulturen.some(k => k.meta_id === formState.selectedKulturId);
-  if (schonVorhanden) { alert("Diese Kultur wurde bereits zum Plan hinzugefügt."); return; }
+  if (schonVorhanden) { toast.error("Diese Kultur wurde bereits zum Plan hinzugefügt."); return; }
 
   const kulturMeta = meta.kulturen.find(k => k.id === formState.selectedKulturId);
   plan.kulturen.push({
@@ -148,7 +150,7 @@ const deleteKultur = (kulturIndex) => { plan.kulturen.splice(kulturIndex, 1); };
 const addBehandlung = (kulturIndex) => {
   const kulturMetaId = plan.kulturen[kulturIndex].meta_id;
   const titel = formState.behandlungTitel[kulturMetaId];
-  if (!titel) { alert("Bitte einen Titel für die Behandlung eingeben."); return; }
+  if (!titel) { toast.error("Bitte einen Titel für die Behandlung eingeben."); return; }
   plan.kulturen[kulturIndex].behandlungen.push({ titel: titel, produkte_im_mix: [] });
   formState.behandlungTitel[kulturMetaId] = '';
 };
@@ -222,14 +224,14 @@ const deleteProdukt = (kIndex, bIndex, pIndex) => {
 
 // Speichert den gesamten Plan im Backend
 const savePlan = async () => {
-  if (!plan.landwirtId || !plan.jahr) { alert("Bitte Landwirt und Jahr auswählen."); return; }
+  if (!plan.landwirtId || !plan.jahr) { toast.error("Bitte Landwirt und Jahr auswählen."); return; }
   try {
     await axios.post('http://127.0.0.1:8000/api/plaene/', plan);
-    alert('Plan erfolgreich erstellt!');
+    toast.success('Plan erfolgreich erstellt!');
     router.push('/dashboard');
   } catch (error) {
     console.error("Fehler beim Speichern des Plans:", error.response?.data);
-    alert("Fehler beim Speichern.");
+    toast.error("Fehler beim Speichern.");
   }
 };
 </script>

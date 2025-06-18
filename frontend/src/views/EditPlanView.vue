@@ -1,9 +1,13 @@
 <template>
   <div class="edit-plan" v-if="plan">
     <h1>Plan für {{ plan.landwirt_name }} ({{ plan.jahr }}) bearbeiten</h1>
-
+    
     <div class="form-block">
       <h2>Stammdaten</h2>
+      <div class="form-group">
+        <label>Landwirt</label>
+        <input type="text" :value="plan.landwirt_name" disabled>
+      </div>
       <div class="form-group">
         <label for="plan-jahr">Jahr</label>
         <input type="number" id="plan-jahr" v-model="plan.jahr">
@@ -32,7 +36,7 @@
       <h2>Bestehende Kulturen & Behandlungen</h2>
       <div v-if="plan.kulturen.length === 0"><p>Diesem Plan wurden noch keine Kulturen hinzugefügt.</p></div>
       
-      <div v-for="(kultur, kulturIndex) in plan.kulturen" :key="kultur.meta_id || kultur.id" class="kultur-item">
+      <div v-for="(kultur, kulturIndex) in plan.kulturen" :key="kultur.id" class="kultur-item">
         <h3>
           <span>Kultur: {{ kultur.name }}</span>
           <button @click="deleteKultur(kulturIndex)" class="button-delete-small">Ganze Kultur entfernen</button>
@@ -85,12 +89,14 @@
 import { ref, reactive, onMounted } from 'vue';
 import axios from 'axios';
 import { useRoute, useRouter } from 'vue-router';
+import { useToast } from "vue-toastification";
 
 const route = useRoute();
 const router = useRouter();
+const toast = useToast();
 
 const plan = ref(null); // Das Haupt-Plan-Objekt, das wir bearbeiten
-const meta = reactive({ kulturen: [] }); // Stammdaten für Dropdowns
+const meta = reactive({ kulturen: [] });
 const formState = reactive({
   selectedKulturId: '',
   behandlungTitel: {},
@@ -112,15 +118,24 @@ onMounted(async () => {
     ]);
     plan.value = planResponse.data;
     meta.kulturen = kulturResponse.data;
-  } catch (error) { console.error("Fehler beim Laden der Daten:", error); }
+  } catch (error) { 
+    console.error("Fehler beim Laden der Daten:", error);
+    toast.error("Fehler beim Laden der Plandaten.");
+  }
 });
 
 const addKultur = () => {
   if (!formState.selectedKulturId) return;
   const kulturMeta = meta.kulturen.find(k => k.id === formState.selectedKulturId);
-  const schonVorhanden = plan.value.kulturen.some(k => (k.id === kulturMeta.id || k.meta_id === kulturMeta.id));
+  const schonVorhanden = plan.value.kulturen.some(k => (k.id === kulturMeta.id || (k.meta_id && k.meta_id === kulturMeta.id)));
   if (schonVorhanden) { alert("Diese Kultur ist bereits im Plan."); return; }
-  plan.value.kulturen.push({ id: kulturMeta.id, meta_id: kulturMeta.id, name: kulturMeta.name, behandlungen: [] });
+  
+  plan.value.kulturen.push({
+    id: null, // Neue Kulturen haben noch keine DB-ID
+    meta_id: kulturMeta.id,
+    name: kulturMeta.name,
+    behandlungen: [],
+  });
 };
 
 const deleteKultur = (kulturIndex) => { plan.value.kulturen.splice(kulturIndex, 1); };
@@ -140,14 +155,14 @@ const showAddProductForm = async (kulturIndex, behandlungIndex) => {
   formState.selectedProdukt = ''; formState.produkte = []; formState.schaderreger = [];
   formState.selectedSchaderreger = ''; formState.aufwandmenge = ''; formState.wartefrist = '';
   try {
-    const kulturId = plan.value.kulturen[kulturIndex].id;
+    const kulturId = plan.value.kulturen[kulturIndex].meta_id || plan.value.kulturen[kulturIndex].id;
     const response = await axios.get(`http://127.0.0.1:8000/api/produkte/?kultur=${kulturId}`);
     formState.produkte = response.data;
   } catch (e) { console.error(e); }
 };
 
 const onProduktSelect = async (kulturIndex) => {
-  const kulturId = plan.value.kulturen[kulturIndex].id;
+  const kulturId = plan.value.kulturen[kulturIndex].meta_id || plan.value.kulturen[kulturIndex].id;
   if (!formState.selectedProdukt) return;
   formState.schaderreger = []; formState.selectedSchaderreger = '';
   try {
@@ -157,13 +172,14 @@ const onProduktSelect = async (kulturIndex) => {
 };
 
 const onSchaderregerSelect = async (kulturIndex) => {
-  const kulturId = plan.value.kulturen[kulturIndex].id;
+  const kulturId = plan.value.kulturen[kulturIndex].meta_id || plan.value.kulturen[kulturIndex].id;
   if (!formState.selectedSchaderreger) return;
   try {
     const response = await axios.get(`http://127.0.0.1:8000/api/zulassungen/?kultur=${kulturId}&produkt=${formState.selectedProdukt}&schaderreger=${formState.selectedSchaderreger}`);
     if (response.data.length > 0) {
-      formState.aufwandmenge = response.data[0].aufwandmenge;
-      formState.wartefrist = response.data[0].wartefrist;
+      const zulassungDetails = response.data[0];
+      formState.aufwandmenge = zulassungDetails.aufwandmenge;
+      formState.wartefrist = zulassungDetails.wartefrist;
     }
   } catch (error) { console.error(error); }
 };
@@ -185,18 +201,27 @@ const deleteProdukt = (kIndex, bIndex, pIndex) => {
 const saveChanges = async () => {
   const planId = route.params.id;
   try {
-    const payload = { ...plan.value };
+    const payload = {
+      ...plan.value,
+      kulturen: plan.value.kulturen.map(k => ({
+        ...k,
+        meta_id: k.meta_id || k.id,
+      }))
+    };
     await axios.put(`http://127.0.0.1:8000/api/plaene/${planId}/`, payload);
-    alert('Änderungen erfolgreich gespeichert!');
+    toast.success('Änderungen erfolgreich gespeichert!');
     router.push(`/plan/detail/${planId}`);
-  } catch (error) { console.error("Fehler beim Speichern der Änderungen:", error.response?.data); }
+  } catch (error) {
+    console.error("Fehler beim Speichern der Änderungen:", error.response?.data);
+    toast.error("Fehler beim Speichern des Plans.");
+  }
 };
 </script>
 
 <style scoped>
 /* (Das CSS von CreatePlanView kann hier weitgehend übernommen werden) */
 .edit-plan { max-width: 900px; margin: 40px auto; padding: 20px; }
-.form-block, .summary-block, .form-container { background-color: #f9f9f9; border: 1px solid #ddd; padding: 20px; border-radius: 8px; margin-bottom: 25px; }
+.form-block, .summary-block { background-color: #f9f9f9; border: 1px solid #ddd; padding: 20px; border-radius: 8px; margin-bottom: 25px; }
 .add-section { display: flex; gap: 10px; align-items: center; }
 .behandlung-add { margin-top: 15px; padding-top: 15px; border-top: 1px dashed #ccc; }
 .kultur-item { border: 1px solid #e3e3e3; padding: 15px; margin-top: 15px; border-radius: 5px; }

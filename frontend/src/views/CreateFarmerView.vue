@@ -35,8 +35,13 @@
 import { reactive } from 'vue';
 import axios from 'axios';
 import { useRouter } from 'vue-router';
+// NEU: Importiere den useToast Hook
+import { useToast } from "vue-toastification";
 
 const router = useRouter();
+// NEU: Initialisiere den Toast-Service
+const toast = useToast();
+
 const farmer = reactive({
   betriebsname: '',
   vorname: '',
@@ -49,10 +54,18 @@ const farmer = reactive({
 const saveFarmer = async () => {
   try {
     await axios.post('http://127.0.0.1:8000/api/landwirte/', farmer);
-    // Bei Erfolg zurück zur Listenansicht
+    
+    // ALT: alert('Landwirt erfolgreich gespeichert!');
+    // NEU: Zeige eine Erfolgs-Benachrichtigung
+    toast.success('Landwirt erfolgreich gespeichert!');
+    
     router.push('/landwirte');
   } catch (error) {
-    console.error("Fehler beim Speichern des Landwirts:", error.response.data);
+    console.error("Fehler beim Speichern des Landwirts:", error.response?.data);
+
+    // ALT: alert('Fehler beim Speichern des Landwirts.');
+    // NEU: Zeige eine Fehler-Benachrichtigung
+    toast.error('Fehler beim Speichern des Landwirts.');
   }
 };
 </script>
