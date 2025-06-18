@@ -3,7 +3,7 @@
 from rest_framework import serializers
 from .models import (
     Plan, Kultur, Behandlung, ProduktInBehandlung, 
-    KulturMetadaten, Pflanzenschutzmittel, SchaderregerMetadaten, Landwirt, Zulassung
+    KulturMetadaten, Pflanzenschutzmittel, SchaderregerMetadaten, Landwirt, Zulassung, AuflageMetadaten
 )
 
 # Diese Serializer bleiben für einfache Listen oder zum Erstellen
@@ -27,6 +27,10 @@ class LandwirtSerializer(serializers.ModelSerializer):
         model = Landwirt
         fields = ['id', 'betriebsname', 'vorname', 'nachname']
 
+class AuflageMetadatenSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AuflageMetadaten
+        fields = ['id', 'text']
 
 # --- NEUE, VERSCHACHTELTE SERIALIZER FÜR DIE DETAILANSICHT ---
 
@@ -85,9 +89,11 @@ class PlanDetailSerializer(serializers.ModelSerializer):
         }
 
 class ZulassungDetailSerializer(serializers.ModelSerializer):
+    auflagen = AuflageMetadatenSerializer(many=True, read_only=True) # NEUE Zeile
     class Meta:
         model = Zulassung
-        fields = ['id', 'aufwandmenge', 'wartefrist', 'anzahl_anwendungen']
-
-
-
+        # 'auflagen' hinzufügen, 'auflagen_bemerkungen' ist schon weg
+        fields = [
+            'id', 'aufwandmenge', 'wartefrist', 'anzahl_anwendungen', 
+            'aufwandmenge_einheit', 'dosage_from', 'dosage_to', 'auflagen'
+        ]

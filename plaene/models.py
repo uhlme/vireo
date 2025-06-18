@@ -22,6 +22,15 @@ class SchaderregerMetadaten(models.Model):
 
     def __str__(self):
         return self.name
+    
+# NEUES MODELL für die Texte der Auflagen
+class AuflageMetadaten(models.Model):
+    """ Speichert eine Auflage/Bemerkung aus dem BLV, z.B. 'SPe 3: Gewässerschutz' """
+    blv_id = models.CharField(max_length=50, unique=True)
+    text = models.TextField()
+
+    def __str__(self):
+        return self.text
 
 # ---------------------------------------------------------
 # KERN-MODELL
@@ -48,17 +57,21 @@ class Pflanzenschutzmittel(models.Model):
 # ---------------------------------------------------------
 
 class Zulassung(models.Model):
-    """
-    Verbindungstabelle: Verknüpft Produkt, Kultur und Schaderreger.
-    """
-    # Da Pflanzenschutzmittel jetzt oben definiert ist, können wir direkt darauf verweisen.
-    produkt = models.ForeignKey(Pflanzenschutzmittel, on_delete=models.CASCADE)
+    produkt = models.ForeignKey('Pflanzenschutzmittel', on_delete=models.CASCADE)
     kultur = models.ForeignKey(KulturMetadaten, on_delete=models.CASCADE)
     schaderreger = models.ForeignKey(SchaderregerMetadaten, on_delete=models.CASCADE)
     
-    aufwandmenge = models.CharField(max_length=100)
-    anzahl_anwendungen = models.CharField(max_length=100)
-    wartefrist = models.CharField(max_length=255)
+    aufwandmenge = models.CharField(max_length=100, blank=True)
+    wartefrist = models.CharField(max_length=255, blank=True)
+    anzahl_anwendungen = models.CharField(max_length=100, blank=True)
+    aufwandmenge_einheit = models.CharField(max_length=50, blank=True)
+    dosage_from = models.CharField(max_length=50, blank=True)
+    dosage_to = models.CharField(max_length=50, blank=True)
+    
+    # ALT: auflagen_bemerkungen = models.TextField(blank=True) -> DIESE ZEILE LÖSCHEN
+    
+    # NEU: Many-to-Many-Beziehung zu den Auflagen
+    auflagen = models.ManyToManyField(AuflageMetadaten, blank=True)
 
     class Meta:
         unique_together = ('produkt', 'kultur', 'schaderreger')

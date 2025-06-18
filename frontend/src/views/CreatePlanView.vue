@@ -44,35 +44,61 @@
             <span>{{ behandlung.titel }}</span>
             <button @click="deleteBehandlung(kulturIndex, behandlungIndex)" class="button-delete-small">X</button>
           </div>
-          
           <ul class="produkt-liste">
             <li v-for="(p, pIndex) in behandlung.produkte_im_mix" :key="p.produktId">
               {{ p.produktName }} - {{ p.aufwandmenge }}
               <button @click="deleteProdukt(kulturIndex, behandlungIndex, pIndex)" class="button-delete-tiny">x</button>
             </li>
           </ul>
-
+          
           <div class="add-produkt-section">
-            <button v-if="formState.activeBehandlung !== `${kulturIndex}-${behandlungIndex}`" @click="showAddProductForm(kulturIndex, behandlungIndex)" class="add-button-small">+ Produkt zu dieser Behandlung hinzufügen</button>
+            <button v-if="formState.activeBehandlung !== `${kulturIndex}-${behandlungIndex}`" @click="showAddProductForm(kultur, kulturIndex, behandlungIndex)" class="add-button-small">+ Produkt zu dieser Behandlung hinzufügen</button>
             
             <div v-if="formState.activeBehandlung === `${kulturIndex}-${behandlungIndex}`" class="add-produkt-form">
-              <select v-model="formState.selectedProdukt" @change="onProduktSelect()">
+              <select v-model="formState.selectedProdukt" @change="onProduktSelect(kultur)">
                 <option disabled value="">Produkt wählen...</option>
                 <option v-for="p in formState.produkte" :key="p.id" :value="p.id">{{ p.produktname }}</option>
               </select>
-              <select v-if="formState.selectedProdukt" v-model="formState.selectedSchaderreger" @change="onSchaderregerSelect()">
+              <p v-if="formState.loadingProdukte">Lade Produkte...</p>
+
+              <select v-if="formState.selectedProdukt" v-model="formState.selectedSchaderreger" @change="onSchaderregerSelect(kultur)">
                 <option disabled value="">Schaderreger wählen...</option>
                 <option v-for="s in formState.schaderreger" :key="s.id" :value="s.id">{{ s.name }}</option>
               </select>
-              <input v-if="formState.selectedSchaderreger" type="text" v-model="formState.aufwandmenge" placeholder="Aufwandmenge" />
-              <button @click="addProductToBehandlung(kulturIndex, behandlungIndex)">OK</button>
+              <p v-if="formState.loadingSchaderreger">Lade Schaderreger...</p>
+
+              <div class="details-grid" v-if="formState.selectedSchaderreger">
+                <div class="form-group">
+                  <label>Dosierung</label>
+                  <p class="auto-filled-field">{{ formState.dosage_from || '–' }} bis {{ formState.dosage_to || '–' }}</p>
+                </div>
+                <div class="form-group">
+                  <label for="aufwandmenge">Aufwandmenge</label>
+                  <div class="input-with-unit">
+                    <input type="text" id="aufwandmenge" v-model="formState.aufwandmenge" />
+                    <span class="unit">{{ formState.aufwandmenge_einheit }}</span>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>Wartefrist</label>
+                   <p class="auto-filled-field">{{ formState.wartefrist || 'N/A' }}</p>
+                </div>
+                <div class="form-group-full" v-if="formState.auflagen.length > 0">
+                  <label>Auflagen & Bemerkungen</label>
+                  <ul class="auflagen-liste">
+                    <li v-for="auflage in formState.auflagen" :key="auflage.id">{{ auflage.text }}</li>
+                  </ul>
+                </div>
+              </div>
+              
+              <button @click="addProductToBehandlung(kulturIndex, behandlungIndex)" :disabled="!formState.selectedSchaderreger" class="add-button">Produkt hinzufügen</button>
             </div>
           </div>
         </div>
 
         <div class="add-section behandlung-add">
           <input type="text" v-model="formState.behandlungTitel[kultur.meta_id]" placeholder="Titel der Behandlung, z.B. Herbizid im Frühling">
-          <button @click="addBehandlung(kulturIndex)" class="add-button-small">+ Behandlung hinzufügen</button>
+          <button @click="addBehandlung(kulturIndex)" class="add-button-small">+ Behandlung</button>
         </div>
       </div>
     </div>
@@ -87,38 +113,21 @@ import axios from 'axios';
 import { useRouter } from 'vue-router';
 import { useToast } from "vue-toastification";
 
-const toast = useToast();
 const router = useRouter();
-
-// Das Haupt-Objekt, das den gesamten Plan enthält und am Ende gespeichert wird
-const plan = reactive({
-  landwirtId: '',
-  jahr: new Date().getFullYear(),
-  kulturen: [], 
-});
-
-// Statische Daten für die Dropdowns
-const meta = reactive({
-  landwirte: [],
-  kulturen: [],
-});
-
-// Temporärer Zustand für die verschiedenen Formulare auf der Seite
+const toast = useToast();
+const plan = reactive({ landwirtId: '', jahr: new Date().getFullYear(), kulturen: [] });
+const meta = reactive({ landwirte: [], kulturen: [] });
 const formState = reactive({
   selectedKulturId: '',
   behandlungTitel: {},
-  activeBehandlung: null, // z.B. "0-1" für Kultur-Index 0, Behandlungs-Index 1
-  produkte: [],
-  loadingProdukte: false,
-  selectedProdukt: '',
-  schaderreger: [],
-  loadingSchaderreger: false,
-  selectedSchaderreger: '',
-  aufwandmenge: '',
-  wartefrist: '',
+  activeBehandlung: null,
+  produkte: [], loadingProdukte: false, selectedProdukt: '',
+  schaderreger: [], loadingSchaderreger: false, selectedSchaderreger: '',
+  aufwandmenge: '', wartefrist: '',
+  aufwandmenge_einheit: '', dosage_from: '', dosage_to: '',
+  auflagen: [],
 });
 
-// Lädt die initialen Stammdaten (Landwirte und alle möglichen Kulturen)
 onMounted(async () => {
   try {
     const [landwirtResponse, kulturResponse] = await Promise.all([
@@ -130,108 +139,87 @@ onMounted(async () => {
   } catch (error) { console.error("Fehler beim Laden der Stammdaten:", error); }
 });
 
-// Fügt eine Kultur zum Plan hinzu
 const addKultur = () => {
   if (!formState.selectedKulturId) return;
   const schonVorhanden = plan.kulturen.some(k => k.meta_id === formState.selectedKulturId);
-  if (schonVorhanden) { toast.error("Diese Kultur wurde bereits zum Plan hinzugefügt."); return; }
-
+  if (schonVorhanden) { return toast.warning("Diese Kultur ist bereits im Plan."); }
   const kulturMeta = meta.kulturen.find(k => k.id === formState.selectedKulturId);
-  plan.kulturen.push({
-    meta_id: kulturMeta.id,
-    name: kulturMeta.name,
-    behandlungen: [],
-  });
+  plan.kulturen.push({ meta_id: kulturMeta.id, name: kulturMeta.name, behandlungen: [] });
 };
 
 const deleteKultur = (kulturIndex) => { plan.kulturen.splice(kulturIndex, 1); };
 
-// Fügt eine leere, benannte Behandlung zu einer spezifischen Kultur hinzu
 const addBehandlung = (kulturIndex) => {
   const kulturMetaId = plan.kulturen[kulturIndex].meta_id;
   const titel = formState.behandlungTitel[kulturMetaId];
-  if (!titel) { toast.error("Bitte einen Titel für die Behandlung eingeben."); return; }
+  if (!titel) return;
   plan.kulturen[kulturIndex].behandlungen.push({ titel: titel, produkte_im_mix: [] });
   formState.behandlungTitel[kulturMetaId] = '';
 };
 
 const deleteBehandlung = (kulturIndex, behandlungIndex) => { plan.kulturen[kulturIndex].behandlungen.splice(behandlungIndex, 1); };
 
-// Aktiviert das "Produkt hinzufügen"-Formular für eine spezifische Behandlung
-const showAddProductForm = async (kulturIndex, behandlungIndex) => {
+const showAddProductForm = async (kultur, kulturIndex, behandlungIndex) => {
   formState.activeBehandlung = `${kulturIndex}-${behandlungIndex}`;
-  formState.selectedProdukt = '';
-  formState.produkte = [];
-  formState.schaderreger = [];
-  formState.selectedSchaderreger = '';
-  formState.aufwandmenge = '';
-  formState.wartefrist = '';
+  formState.selectedProdukt = ''; formState.produkte = []; formState.schaderreger = [];
+  formState.selectedSchaderreger = ''; formState.aufwandmenge = ''; formState.wartefrist = '';
+  formState.aufwandmenge_einheit = ''; formState.dosage_from = ''; formState.dosage_to = ''; formState.auflagen = [];
   formState.loadingProdukte = true;
   try {
-    const kulturId = plan.kulturen[kulturIndex].meta_id;
-    const response = await axios.get(`http://127.0.0.1:8000/api/produkte/?kultur=${kulturId}`);
+    const response = await axios.get(`http://127.0.0.1:8000/api/produkte/?kultur=${kultur.meta_id}`);
     formState.produkte = response.data;
-  } catch (e) { console.error(e); }
-  finally { formState.loadingProdukte = false; }
+  } catch (e) { console.error(e); } finally { formState.loadingProdukte = false; }
 };
 
-// Lädt die gefilterten Schaderreger, wenn ein Produkt ausgewählt wird
-const onProduktSelect = async () => {
-  const kulturIndex = formState.activeBehandlung.split('-')[0];
-  const kulturId = plan.kulturen[kulturIndex].meta_id;
+const onProduktSelect = async (kultur) => {
   if (!formState.selectedProdukt) return;
   formState.loadingSchaderreger = true;
-  formState.schaderreger = [];
-  formState.selectedSchaderreger = '';
+  formState.schaderreger = []; formState.selectedSchaderreger = '';
   try {
-    const response = await axios.get(`http://127.0.0.1:8000/api/schaderreger/?kultur=${kulturId}&produkt=${formState.selectedProdukt}`);
+    const response = await axios.get(`http://127.0.0.1:8000/api/schaderreger/?kultur=${kultur.meta_id}&produkt=${formState.selectedProdukt}`);
     formState.schaderreger = response.data;
-  } catch (error) { console.error("Fehler beim Laden der Schaderreger:", error); }
-  finally { formState.loadingSchaderreger = false; }
+  } catch (error) { console.error(error); } finally { formState.loadingSchaderreger = false; }
 };
 
-// Lädt die Zulassungsdetails, wenn ein Schaderreger ausgewählt wird
-const onSchaderregerSelect = async () => {
-  const kulturIndex = formState.activeBehandlung.split('-')[0];
-  const kulturId = plan.kulturen[kulturIndex].meta_id;
+const onSchaderregerSelect = async (kultur) => {
   if (!formState.selectedSchaderreger) return;
   try {
-    const response = await axios.get(`http://127.0.0.1:8000/api/zulassungen/?kultur=${kulturId}&produkt=${formState.selectedProdukt}&schaderreger=${formState.selectedSchaderreger}`);
-    if (response.data && response.data.length > 0) {
+    const response = await axios.get(`http://127.0.0.1:8000/api/zulassungen/?kultur=${kultur.meta_id}&produkt=${formState.selectedProdukt}&schaderreger=${formState.selectedSchaderreger}`);
+    if (response.data.length > 0) {
       const zulassungDetails = response.data[0];
       formState.aufwandmenge = zulassungDetails.aufwandmenge;
       formState.wartefrist = zulassungDetails.wartefrist;
+      formState.aufwandmenge_einheit = zulassungDetails.aufwandmenge_einheit;
+      formState.dosage_from = zulassungDetails.dosage_from;
+      formState.dosage_to = zulassungDetails.dosage_to;
+      formState.auflagen = zulassungDetails.auflagen;
     }
-  } catch (error) { console.error("Fehler beim Laden der Zulassungsdetails:", error); }
+  } catch (error) { console.error(error); }
 };
 
-// Fügt das ausgewählte Produkt zur richtigen Behandlung im Plan hinzu
-const addProductToBehandlung = () => {
-  const [kulturIndex, behandlungIndex] = formState.activeBehandlung.split('-').map(Number);
+const addProductToBehandlung = (kulturIndex, behandlungIndex) => {
   const produkt = formState.produkte.find(p => p.id === formState.selectedProdukt);
+  if (!produkt) return;
   plan.kulturen[kulturIndex].behandlungen[behandlungIndex].produkte_im_mix.push({
     produktId: formState.selectedProdukt,
     produktName: produkt.produktname,
-    aufwandmenge: formState.aufwandmenge,
+    aufwandmenge: `${formState.aufwandmenge} ${formState.aufwandmenge_einheit}`,
+    auflagen: formState.auflagen,
   });
-  formState.activeBehandlung = null; // Formular schliessen
+  formState.activeBehandlung = null;
 };
 
-// Löscht ein spezifisches Produkt aus einem Tank-Mix
-const deleteProdukt = (kIndex, bIndex, pIndex) => {
-  plan.kulturen[kIndex].behandlungen[bIndex].produkte_im_mix.splice(pIndex, 1);
-};
+const deleteProdukt = (kIndex, bIndex, pIndex) => { plan.kulturen[kIndex].behandlungen[bIndex].produkte_im_mix.splice(pIndex, 1); };
 
-// Speichert den gesamten Plan im Backend
 const savePlan = async () => {
-  if (!plan.landwirtId || !plan.jahr) { toast.error("Bitte Landwirt und Jahr auswählen."); return; }
+  if (!plan.landwirtId || !plan.jahr) { return toast.error("Bitte Landwirt und Jahr auswählen."); }
   try {
     await axios.post('http://127.0.0.1:8000/api/plaene/', plan);
     toast.success('Plan erfolgreich erstellt!');
     router.push('/dashboard');
   } catch (error) {
     console.error("Fehler beim Speichern des Plans:", error.response?.data);
-    toast.error("Fehler beim Speichern.");
+    toast.error("Fehler beim Speichern des Plans.");
   }
 };
 </script>
@@ -243,13 +231,20 @@ const savePlan = async () => {
 .behandlung-add { margin-top: 15px; padding-top: 15px; border-top: 1px dashed #ccc; }
 .kultur-item { border: 1px solid #e3e3e3; padding: 15px; margin-top: 15px; border-radius: 5px; }
 .kultur-item h3 { display: flex; justify-content: space-between; align-items: center; }
-.behandlung-item { padding: 10px; margin-left: 20px; margin-top: 10px; background-color: #fff; border: 1px solid #eee; }
+.behandlung-item { padding: 10px; margin-left: 20px; margin-top: 10px; background-color: #fff; border: 1px solid #eee; border-radius: 4px; }
 .behandlung-header { display: flex; justify-content: space-between; align-items: center; font-weight: bold; }
 .produkt-liste { margin-left: 20px; margin-top: 10px; }
 .produkt-liste li { display: flex; justify-content: space-between; font-size: 14px; padding: 4px 0; }
 .save-button { width: 100%; padding: 12px; font-size: 18px; background-color: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; margin-top: 20px; }
-.add-button-small, .button-delete-small { font-size: 12px; padding: 5px 10px; white-space: nowrap; }
+.add-button, .add-button-small, .button-delete-small, .button-delete-tiny { font-size: 12px; padding: 5px 10px; white-space: nowrap; }
 .button-delete-tiny { font-size: 10px; padding: 2px 5px; }
 .add-produkt-section { margin-top: 10px; }
-.add-produkt-form { display: flex; gap: 10px; align-items: center; margin-top: 10px; padding: 10px; background: #f0f0f0; border-radius: 4px; }
+.add-produkt-form { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; padding: 15px; background: #f0f0f0; border-radius: 4px; }
+.details-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; width: 100%; margin-top: 10px; }
+.form-group-full { grid-column: 1 / -1; }
+.auflagen-liste { font-size: 12px; max-height: 100px; overflow-y: auto; background: #fff; border: 1px solid #ccc; padding: 5px; margin-top: 5px; }
+.input-with-unit { display: flex; align-items: center; }
+.input-with-unit input { flex-grow: 1; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.input-with-unit span { padding: 8px; background-color: #e9ecef; border: 1px solid #ccc; border-left: none; border-radius: 0 4px 4px 0; }
+.auto-filled-field { background-color: #e9ecef; padding: 8px; border-radius: 4px; border: 1px solid #ccc; min-height: 35px; text-align: left;}
 </style>
