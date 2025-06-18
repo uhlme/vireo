@@ -1,16 +1,12 @@
 <template>
   <div class="edit-plan" v-if="plan">
     <h1>Plan für {{ plan.landwirt_name }} ({{ plan.jahr }}) bearbeiten</h1>
-    
+
     <div class="form-block">
       <h2>Stammdaten</h2>
       <div class="form-group">
-        <label>Landwirt</label>
-        <input type="text" :value="plan.landwirt_name" disabled>
-      </div>
-      <div class="form-group">
-        <label for="plan-jahr">Jahr</label>
-        <input type="number" id="plan-jahr" v-model="plan.jahr">
+        <label for="jahr">Jahr</label>
+        <input type="number" id="jahr" v-model="plan.jahr">
       </div>
       <div class="form-group">
         <label for="status">Plan-Status</label>
@@ -22,13 +18,13 @@
     </div>
 
     <div class="form-block">
-      <h2>Kulturen hinzufügen</h2>
+      <h2>Kulturen zum Plan hinzufügen</h2>
       <div class="add-section">
         <select v-model="formState.selectedKulturId">
           <option disabled value="">Kultur auswählen...</option>
           <option v-for="kultur in meta.kulturen" :key="kultur.id" :value="kultur.id">{{ kultur.name }}</option>
         </select>
-        <button @click="addKultur" class="add-button-small">Kultur zum Plan hinzufügen</button>
+        <button @click="addKultur" class="add-button-small">Hinzufügen</button>
       </div>
     </div>
 
@@ -36,7 +32,7 @@
       <h2>Bestehende Kulturen & Behandlungen</h2>
       <div v-if="plan.kulturen.length === 0"><p>Diesem Plan wurden noch keine Kulturen hinzugefügt.</p></div>
       
-      <div v-for="(kultur, kulturIndex) in plan.kulturen" :key="kultur.id" class="kultur-item">
+      <div v-for="(kultur, kulturIndex) in plan.kulturen" :key="kultur.meta_id" class="kultur-item">
         <h3>
           <span>Kultur: {{ kultur.name }}</span>
           <button @click="deleteKultur(kulturIndex)" class="button-delete-small">Ganze Kultur entfernen</button>
@@ -50,7 +46,7 @@
           
           <ul class="produkt-liste">
             <li v-for="(p, pIndex) in behandlung.produkte_im_mix" :key="pIndex">
-              {{ p.produktName || p.produkt.produktname }} - {{ p.aufwandmenge }}
+              {{ p.produktName }} - {{ p.aufwandmenge }}
               <button @click="deleteProdukt(kulturIndex, behandlungIndex, pIndex)" class="button-delete-tiny">x</button>
             </li>
           </ul>
@@ -73,14 +69,13 @@
         </div>
 
         <div class="add-section behandlung-add">
-          <input type="text" v-model="formState.behandlungTitel[kultur.id]" placeholder="Titel der neuen Behandlung...">
+          <input type="text" v-model="formState.behandlungTitel[kultur.meta_id]" placeholder="Titel der neuen Behandlung...">
           <button @click="addBehandlung(kulturIndex)" class="add-button-small">+ Behandlung</button>
         </div>
       </div>
     </div>
 
     <button @click="saveChanges" class="save-button">Ganzen Plan mit Änderungen speichern</button>
-
   </div>
   <div v-else><p>Lade Plandaten...</p></div>
 </template>
@@ -95,15 +90,17 @@ const route = useRoute();
 const router = useRouter();
 const toast = useToast();
 
-const plan = ref(null); // Das Haupt-Plan-Objekt, das wir bearbeiten
+const plan = ref(null);
 const meta = reactive({ kulturen: [] });
 const formState = reactive({
   selectedKulturId: '',
   behandlungTitel: {},
   activeBehandlung: null,
   produkte: [],
+  loadingProdukte: false,
   selectedProdukt: '',
   schaderreger: [],
+  loadingSchaderreger: false,
   selectedSchaderreger: '',
   aufwandmenge: '',
   wartefrist: '',
@@ -116,22 +113,43 @@ onMounted(async () => {
       axios.get(`http://127.0.0.1:8000/api/plaene/${planId}/`),
       axios.get('http://127.0.0.1:8000/api/kulturen/'),
     ]);
-    plan.value = planResponse.data;
+    
+    const loadedPlan = planResponse.data;
     meta.kulturen = kulturResponse.data;
+
+    // Transformation der Daten, um eine konsistente Struktur sicherzustellen
+    loadedPlan.kulturen = loadedPlan.kulturen.map(kultur => {
+      const kulturMeta = meta.kulturen.find(k => k.name === kultur.name);
+      return {
+        ...kultur,
+        meta_id: kulturMeta ? kulturMeta.id : null, 
+        behandlungen: kultur.behandlungen.map(behandlung => ({
+          ...behandlung,
+          produkte_im_mix: behandlung.produkte_im_mix.map(p_im_mix => ({
+            produktId: p_im_mix.produkt.id,
+            produktName: p_im_mix.produkt.produktname,
+            aufwandmenge: `${p_im_mix.aufwandmenge} ${p_im_mix.einheit}`,
+          }))
+        }))
+      }
+    });
+
+    plan.value = loadedPlan;
+
   } catch (error) { 
     console.error("Fehler beim Laden der Daten:", error);
     toast.error("Fehler beim Laden der Plandaten.");
   }
 });
 
+// --- Ab hier folgen die Funktionen zur Bearbeitung des Plans ---
+
 const addKultur = () => {
   if (!formState.selectedKulturId) return;
   const kulturMeta = meta.kulturen.find(k => k.id === formState.selectedKulturId);
-  const schonVorhanden = plan.value.kulturen.some(k => (k.id === kulturMeta.id || (k.meta_id && k.meta_id === kulturMeta.id)));
+  const schonVorhanden = plan.value.kulturen.some(k => k.meta_id === kulturMeta.id);
   if (schonVorhanden) { alert("Diese Kultur ist bereits im Plan."); return; }
-  
   plan.value.kulturen.push({
-    id: null, // Neue Kulturen haben noch keine DB-ID
     meta_id: kulturMeta.id,
     name: kulturMeta.name,
     behandlungen: [],
@@ -141,38 +159,45 @@ const addKultur = () => {
 const deleteKultur = (kulturIndex) => { plan.value.kulturen.splice(kulturIndex, 1); };
 
 const addBehandlung = (kulturIndex) => {
-  const kulturId = plan.value.kulturen[kulturIndex].id;
-  const titel = formState.behandlungTitel[kulturId];
+  const kulturMetaId = plan.value.kulturen[kulturIndex].meta_id;
+  const titel = formState.behandlungTitel[kulturMetaId];
   if (!titel) return;
   plan.value.kulturen[kulturIndex].behandlungen.push({ titel: titel, produkte_im_mix: [] });
-  formState.behandlungTitel[kulturId] = '';
+  formState.behandlungTitel[kulturMetaId] = '';
 };
 
-const deleteBehandlung = (kulturIndex, behandlungIndex) => { plan.value.kulturen[kulturIndex].behandlungen.splice(behandlungIndex, 1); };
+const deleteBehandlung = (kulturIndex, behandlungIndex) => {
+  plan.value.kulturen[kulturIndex].behandlungen.splice(behandlungIndex, 1);
+};
 
 const showAddProductForm = async (kulturIndex, behandlungIndex) => {
   formState.activeBehandlung = `${kulturIndex}-${behandlungIndex}`;
   formState.selectedProdukt = ''; formState.produkte = []; formState.schaderreger = [];
   formState.selectedSchaderreger = ''; formState.aufwandmenge = ''; formState.wartefrist = '';
+  formState.loadingProdukte = true;
   try {
-    const kulturId = plan.value.kulturen[kulturIndex].meta_id || plan.value.kulturen[kulturIndex].id;
+    const kulturId = plan.value.kulturen[kulturIndex].meta_id;
     const response = await axios.get(`http://127.0.0.1:8000/api/produkte/?kultur=${kulturId}`);
     formState.produkte = response.data;
   } catch (e) { console.error(e); }
+  finally { formState.loadingProdukte = false; }
 };
 
 const onProduktSelect = async (kulturIndex) => {
-  const kulturId = plan.value.kulturen[kulturIndex].meta_id || plan.value.kulturen[kulturIndex].id;
+  const kulturId = plan.value.kulturen[kulturIndex].meta_id;
   if (!formState.selectedProdukt) return;
-  formState.schaderreger = []; formState.selectedSchaderreger = '';
+  formState.loadingSchaderreger = true;
+  formState.schaderreger = [];
+  formState.selectedSchaderreger = '';
   try {
     const response = await axios.get(`http://127.0.0.1:8000/api/schaderreger/?kultur=${kulturId}&produkt=${formState.selectedProdukt}`);
     formState.schaderreger = response.data;
   } catch (error) { console.error(error); }
+  finally { formState.loadingSchaderreger = false; }
 };
 
 const onSchaderregerSelect = async (kulturIndex) => {
-  const kulturId = plan.value.kulturen[kulturIndex].meta_id || plan.value.kulturen[kulturIndex].id;
+  const kulturId = plan.value.kulturen[kulturIndex].meta_id;
   if (!formState.selectedSchaderreger) return;
   try {
     const response = await axios.get(`http://127.0.0.1:8000/api/zulassungen/?kultur=${kulturId}&produkt=${formState.selectedProdukt}&schaderreger=${formState.selectedSchaderreger}`);
@@ -184,14 +209,16 @@ const onSchaderregerSelect = async (kulturIndex) => {
   } catch (error) { console.error(error); }
 };
 
-const addProductToBehandlung = (kulturIndex, behandlungIndex) => {
+const addProductToBehandlung = () => {
+  const [kulturIndex, behandlungIndex] = formState.activeBehandlung.split('-').map(Number);
   const produkt = formState.produkte.find(p => p.id === formState.selectedProdukt);
   if (!produkt) return;
   plan.value.kulturen[kulturIndex].behandlungen[behandlungIndex].produkte_im_mix.push({
-    produktId: formState.selectedProdukt, produktName: produkt.produktname,
+    produktId: formState.selectedProdukt,
+    produktName: produkt.produktname,
     aufwandmenge: formState.aufwandmenge,
   });
-  formState.activeBehandlung = null;
+  formState.activeBehandlung = null; // Formular schliessen
 };
 
 const deleteProdukt = (kIndex, bIndex, pIndex) => {
@@ -201,11 +228,13 @@ const deleteProdukt = (kIndex, bIndex, pIndex) => {
 const saveChanges = async () => {
   const planId = route.params.id;
   try {
+    // Das Backend erwartet die Kultur-ID unter 'meta_id' und die Landwirt-ID unter 'landwirt'
     const payload = {
       ...plan.value,
+      landwirt: plan.value.landwirt, // Stellt sicher, dass die Landwirt-ID gesendet wird
       kulturen: plan.value.kulturen.map(k => ({
         ...k,
-        meta_id: k.meta_id || k.id,
+        meta_id: k.meta_id || k.id, 
       }))
     };
     await axios.put(`http://127.0.0.1:8000/api/plaene/${planId}/`, payload);
@@ -219,7 +248,6 @@ const saveChanges = async () => {
 </script>
 
 <style scoped>
-/* (Das CSS von CreatePlanView kann hier weitgehend übernommen werden) */
 .edit-plan { max-width: 900px; margin: 40px auto; padding: 20px; }
 .form-block, .summary-block { background-color: #f9f9f9; border: 1px solid #ddd; padding: 20px; border-radius: 8px; margin-bottom: 25px; }
 .add-section { display: flex; gap: 10px; align-items: center; }

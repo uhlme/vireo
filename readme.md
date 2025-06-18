@@ -1,4 +1,4 @@
-Pflanzenschutzmittel-Planer
+# Pflanzenschutzmittel-Planer
 
 Eine Web-Anwendung zur Erstellung und Verwaltung von Pflanzenschutzmittel-Plänen für die Schweizer Landwirtschaft. Das Projekt besteht aus einem Django-Backend (API) und einem Vue.js-Frontend.
 Voraussetzungen
@@ -23,27 +23,27 @@ Backend einrichten:
 Bash
 
 # Virtuelle Umgebung erstellen
-python3 -m venv venv
+    python3 -m venv venv
 
 # Virtuelle Umgebung aktivieren
 # Für Windows:
- .\venv\Scripts\activate
+    .\venv\Scripts\activate
 # Für macOS / Linux:
-source venv/bin/activate
+    source venv/bin/activate
 
 # Alle Python-Pakete installieren
-pip install -r requirements.txt
+    pip install -r requirements.txt
 
 # Die Datenbank-Struktur erstellen
-python manage.py migrate
+    python manage.py migrate
 
 # Einen Administrator-Benutzer für den Login anlegen
-python manage.py createsuperuser
+    python manage.py createsuperuser
 
 # Die BLV-Daten importieren (dies kann einige Minuten dauern)
-python manage.py import_psm
+    python manage.py import_psm
 
-Frontend einrichten:
+# Frontend einrichten:
 Bash
 
     # In den Frontend-Ordner wechseln
@@ -52,7 +52,7 @@ Bash
     # Alle JavaScript-Pakete installieren
     npm install
 
-Anwendung im Entwicklungsmodus starten
+# Anwendung im Entwicklungsmodus starten
 
 Für die tägliche Arbeit musst du zwei Terminals gleichzeitig offen haben.
 Terminal 1: Backend-Server starten

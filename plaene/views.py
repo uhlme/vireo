@@ -131,6 +131,8 @@ class KulturMetadatenViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
 
 
+# plaene/views.py
+
 class PflanzenschutzmittelViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = PflanzenschutzmittelSerializer
     permission_classes = [IsAuthenticated]
@@ -139,7 +141,10 @@ class PflanzenschutzmittelViewSet(viewsets.ReadOnlyModelViewSet):
         queryset = Pflanzenschutzmittel.objects.all()
         kultur_id = self.request.query_params.get('kultur')
         if kultur_id is not None:
-            queryset = queryset.filter(zulassung__kultur__id=kultur_id).distinct()
+            # --- HIER IST DIE ÄNDERUNG ---
+            # Wir filtern direkt über das von uns definierte Many-to-Many-Feld.
+            # Das ist der direkteste und sicherste Weg.
+            queryset = queryset.filter(zugelassene_anwendungen__id=kultur_id).distinct()
         return queryset
 
 
